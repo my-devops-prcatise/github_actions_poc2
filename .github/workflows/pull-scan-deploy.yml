@@ -1,0 +1,67 @@
+name: Pull (DockerHub) -> Scan -> Deploy to EKS
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker Hub image tag to deploy (defaults to latest)'
+        required: false
+        default: 'latest'
+
+env:
+  IMAGE_REPO: devenops641/talesofchina
+
+jobs:
+  scan-and-deploy:
+    name: Scan image and deploy to EKS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set image tag (from input)
+        run: echo "IMAGE_TAG=${{ github.event.inputs.image_tag || 'latest' }}" >> $GITHUB_ENV
+
+      - name: Show image to be deployed
+        run: echo "Deploying image: ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}"
+
+      # Trivy scan of remote public image
+      - name: Trivy scan image on Docker Hub
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
+          format: 'table'
+          exit-code: '1'        # fail workflow on HIGH/CRITICAL (adjust below)
+          severity: 'CRITICAL,HIGH'
+
+      # Configure AWS to reach EKS
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'latest'
+
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --region ${{ secrets.AWS_REGION }} --name ${{ secrets.EKS_CLUSTER_NAME }}
+
+      - name: Verify cluster connectivity
+        run: kubectl get nodes --no-headers
+
+      - name: Update Deployment image to Docker Hub image
+        run: |
+          # Replace both deployment name and container name if different
+          kubectl set image deployment/talesofchina talesofchina=${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }} --record
+          kubectl rollout status deployment/talesofchina --timeout=120s
+
+      - name: Show rollout pods
+        run: kubectl get pods -l app=talesofchina -o wide
