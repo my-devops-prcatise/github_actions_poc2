@@ -6,9 +6,6 @@
 
 ---
 
-Here is a clean **README.md format** you can paste directly into your repository.
-It includes every step you need **before running your GitHub Actions pipeline**.
-
 ---
 
 # 🚀 EndHunger CI/CD Pipeline – Setup Guide
@@ -209,6 +206,5 @@ Developer → GitHub → GitHub Actions (EC2 Self-Hosted Runner)
 
 ---
 
-If you want the **final README with diagrams included**, just tell me!
 
 
