@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: talesofchina
-          image: devenops641/talesofchina:latest
+          image: devenops641/endhunger:latest
           ports:
             - containerPort: 80
           readinessProbe:
