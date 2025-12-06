@@ -6,207 +6,209 @@
 
 ---
 
-# 📌 GitHub Actions → DockerHub Image → Amazon EKS Deployment (POC Guide)
-
-This POC demonstrates deploying an existing **public Docker Hub image** (`devenops641/talesofchina`) to an **Amazon EKS** cluster using **GitHub Actions**.
-No Docker build or push step is required.
+Here is a clean **README.md format** you can paste directly into your repository.
+It includes every step you need **before running your GitHub Actions pipeline**.
 
 ---
 
-## ✅ **Step 1: Prerequisites**
+# 🚀 EndHunger CI/CD Pipeline – Setup Guide
 
-Before starting, make sure you have:
+### GitHub Actions → SonarQube → Trivy → Terraform (EKS) → Kubernetes Deployment
 
-* An **AWS account**
-* A working **EKS Cluster**
-* A **node group** attached to the cluster
-* `kubectl` access tested locally
-
-  ```bash
-  kubectl get nodes
-  ```
-* A public Docker image:
-  `docker pull devenops641/talesofchina`
+This guide explains **everything you must set up BEFORE executing the GitHub Actions `deploy.yml` pipeline**.
 
 ---
 
-## ✅ **Step 2: Prepare Kubernetes Deployment Manifest**
+## ✅ **Step 1: Install Terraform on your Ubuntu EC2 (Self-Hosted Runner)**
 
-Create a folder in your repo:
+Your EC2 self-hosted runner must have Terraform installed, because Terraform will create the full EKS infrastructure.
 
-```
-k8s/deployment.yaml
-```
-
-Add this Deployment (modify port or names if needed):
-
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: talesofchina
-  labels:
-    app: talesofchina
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: talesofchina
-  template:
-    metadata:
-      labels:
-        app: talesofchina
-    spec:
-      containers:
-        - name: talesofchina
-          image: devenops641/talesofchina:latest
-          ports:
-            - containerPort: 80
-```
-
-Apply it once manually (only first time):
+Run the following commands:
 
 ```bash
-kubectl apply -f k8s/
+sudo apt-get update
+sudo apt-get install -y gnupg software-properties-common curl
+curl -fsSL https://apt.releases.hashicorp.com/gpg | sudo apt-key add -
+sudo apt-add-repository "deb [arch=amd64] https://apt.releases.hashicorp.com $(lsb_release -cs) main"
+sudo apt-get update
+sudo apt-get install -y terraform
 ```
 
----
-
-## ✅ **Step 3: Create GitHub Secrets**
-
-Go to:
-
-**GitHub Repo → Settings → Secrets → Actions**
-
-Create:
-
-| Secret Name             | Value Example            |
-| ----------------------- | ------------------------ |
-| `AWS_ACCESS_KEY_ID`     | Your IAM user access key |
-| `AWS_SECRET_ACCESS_KEY` | Your IAM user secret     |
-| `AWS_REGION`            | e.g., `ap-south-1`       |
-| `EKS_CLUSTER_NAME`      | e.g., `my-eks-cluster`   |
-
-✔ IAM user must have permissions:
-`eks:DescribeCluster`, `eks:DescribeNodegroup`, `sts:AssumeRole`, `eks:UpdateClusterConfig`
-
----
-
-## ✅ **Step 4: Add GitHub Actions Workflow**
-
-Create:
-
-```
-.github/workflows/deploy.yml
-```
-
-Paste this:
-
-```yaml
-name: Pull (DockerHub) -> Scan -> Deploy to EKS
-
-on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:
-    inputs:
-      image_tag:
-        description: 'Docker Hub image tag (default: latest)'
-        required: false
-        default: 'latest'
-
-env:
-  IMAGE_REPO: devenops641/talesofchina
-
-jobs:
-  scan-and-deploy:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Set image tag
-        run: echo "IMAGE_TAG=${{ github.event.inputs.image_tag || 'latest' }}" >> $GITHUB_ENV
-
-      - name: Show image to deploy
-        run: echo "Deploying ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}"
-
-      - name: Trivy scan of DockerHub image
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
-          format: table
-          exit-code: 0
-          severity: CRITICAL,HIGH
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
-
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: latest
-
-      - name: Update kubeconfig for EKS
-        run: aws eks update-kubeconfig --name ${{ secrets.EKS_CLUSTER_NAME }} --region ${{ secrets.AWS_REGION }}
-
-      - name: Check cluster nodes
-        run: kubectl get nodes
-
-      - name: Deploy to EKS (update container image)
-        run: |
-          kubectl set image deployment/talesofchina talesofchina=${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }} --record
-          kubectl rollout status deployment/talesofchina --timeout=120s
-```
-
----
-
-## ✅ **Step 5: Push Code to GitHub**
-
-Commit and push:
+Verify:
 
 ```bash
-git add .
-git commit -m "Added EKS deployment workflow"
-git push origin main
+terraform -version
 ```
-
-This triggers the CI/CD pipeline.
 
 ---
 
-## ✅ **Step 6: Verify Deployment**
-
-Run:
+## ✅ **Step 2: Install AWS CLI (Terraform needs AWS authentication)**
 
 ```bash
-kubectl get pods -l app=talesofchina
-kubectl get svc
-kubectl describe deployment talesofchina
+sudo apt install -y awscli
+aws --version
 ```
 
-Once pods are running and healthy, your app is deployed.
+Configure it:
+
+```bash
+aws configure
+```
+
+Enter:
+
+* **AWS Access Key**
+* **AWS Secret Key**
+* **Region** (ex: `us-east-1`)
+* Output: `json`
 
 ---
 
-## 🎉 **POC Completed!**
+## ✅ **Step 3: Deploy EKS Cluster Using Terraform**
 
-Your flow is now:
+Navigate to your Terraform folder:
 
+```bash
+cd terraform/
 ```
-GitHub Push → GitHub Actions → Trivy Scan → EKS Deployment (using DockerHub image)
+
+Initialize Terraform:
+
+```bash
+terraform init
 ```
 
-No Docker build
-No Docker push
-No Slack
+Review resources:
 
-JUST **pull, scan, deploy** ✔
+```bash
+terraform plan
+```
+
+Apply:
+
+```bash
+terraform apply
+```
+
+Terraform will now create:
+
+* VPC
+* Subnets
+* NAT Gateway
+* EKS Cluster
+* Worker Node Group
+
+Wait until it completes successfully.
 
 ---
+
+## ✅ **Step 4: Configure kubectl to Connect to EKS**
+
+After Terraform creates the cluster:
+
+```bash
+aws eks update-kubeconfig --name <cluster-name> --region <region>
+```
+
+Test connection:
+
+```bash
+kubectl get nodes
+```
+
+If you see worker nodes → you're connected successfully.
+
+---
+
+## ✅ **Step 5: Apply Your Kubernetes Manifests Once**
+
+Before running the CI/CD pipeline, you must manually apply your YAML files one time.
+
+Apply Deployment:
+
+```bash
+kubectl apply -f k8s/deployment.yaml
+```
+
+Apply Service:
+
+```bash
+kubectl apply -f k8s/service.yaml
+```
+
+Verify:
+
+```bash
+kubectl get all
+```
+
+This creates:
+
+* Deployment → `endhunger`
+* Service (LoadBalancer)
+* 2 pods running
+* External LoadBalancer URL
+
+---
+
+## ✅ **Step 6: Verify Kubernetes Pulls the Image**
+
+Kubernetes automatically pulls:
+
+```
+devenops641/endhunger:latest
+```
+
+Check:
+
+```bash
+kubectl describe pod <pod-name> | grep -i "Pulled"
+```
+
+---
+
+## ✅ **Step 7: NOW You Can Execute GitHub Actions `deploy.yml`**
+
+The pipeline will perform:
+
+1. **SonarQube Scan** – Code analysis
+
+2. **Trivy Scan** – Docker image vulnerability scan
+
+3. **Apply K8s manifests** (deployment + service)
+
+4. **Rolling update** in EKS using:
+
+   ```
+   kubectl set image
+   ```
+
+5. **Verify rollout**
+
+6. **Print the running pods**
+
+This works *only after* EKS cluster + deployment + service exist.
+
+---
+
+# 🎉 Final Architecture Flow
+
+```
+Developer → GitHub → GitHub Actions (EC2 Self-Hosted Runner)
+                  ↓
+            SonarQube Scan
+                  ↓
+             Trivy Image Scan
+                  ↓
+        Kubernetes Manifests Applied
+                  ↓
+  Rolling Update to Amazon EKS Deployment
+                  ↓
+          Verify Pods & Rollout
+```
+
+---
+
+If you want the **final README with diagrams included**, just tell me!
+
 
