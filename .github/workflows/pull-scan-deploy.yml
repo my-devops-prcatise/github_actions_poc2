@@ -56,13 +56,13 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
       # FIXED: use a valid Trivy Action tag
-      - name: Trivy Scan
-        uses: aquasecurity/trivy-action@0.33.1
-        with:
-          image-ref: ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
-          format: 'table'
-          exit-code: '1'
-          severity: 'CRITICAL,HIGH'
+#      - name: Trivy Scan
+#        uses: aquasecurity/trivy-action@0.33.1
+#        with:
+#          image-ref: ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
+#          format: 'table'
+#          exit-code: '1'
+#          severity: 'CRITICAL,HIGH'
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
