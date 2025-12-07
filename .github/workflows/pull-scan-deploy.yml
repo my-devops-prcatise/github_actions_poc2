@@ -1,3 +1,4 @@
+
 name: CI/CD -> SonarQube -> Trivy -> EKS
 
 on:
@@ -11,22 +12,22 @@ on:
         default: "latest"
 
 env:
-  IMAGE_REPO: devenops641/endhunger       # DockerHub repo
-  IMAGE_TAG: latest                       # Fixed default tag
-  K8S_NAMESPACE: default                  # Kubernetes namespace
-  K8S_DEPLOYMENT: endhunger               # Deployment name in K8s
-  K8S_CONTAINER: endhunger                # Container name in Deployment
+  IMAGE_REPO: devenops641/endhunger
+  IMAGE_TAG: latest
+  K8S_NAMESPACE: default
+  K8S_DEPLOYMENT: endhunger
+  K8S_CONTAINER: endhunger
 
 jobs:
   deploy:
-    runs-on: self-hosted                  # EC2 self-hosted runner
+    runs-on: self-hosted
 
     steps:
       # 1) Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2) Override IMAGE_TAG when manually triggered
+      # 2) Set IMAGE_TAG from workflow_dispatch (fallback to latest)
       - name: Set IMAGE_TAG
         run: |
           TAG="${{ github.event.inputs.image_tag }}"
@@ -34,7 +35,13 @@ jobs:
           echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
           echo "Using image: ${{ env.IMAGE_REPO }}:$TAG"
 
-      # 3) SonarQube scan
+      # 3) Ensure kubectl is available (version should match your cluster, e.g., 1.29)
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.29.0'
+
+      # 4) SonarQube scan (requires sonar-scanner installed on runner)
       - name: SonarQube Scan
         run: |
           sonar-scanner \
@@ -42,17 +49,14 @@ jobs:
             -Dsonar.sources=. \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}
-        env:
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-      # 4) Pull Docker image from DockerHub
+      # 5) Pull Docker image from Docker Hub
       - name: Pull Docker image
         run: |
           echo "Pulling ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}"
           docker pull ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
 
-      # 5) Trivy scan
+      # 6) Trivy image vulnerability scan
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@v0.24.0
         with:
@@ -61,7 +65,7 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-      # 6) Configure AWS credentials
+      # 7) Configure AWS creds
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -69,25 +73,28 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Update kubeconfig for EKS
+      # 8) Update kubeconfig for EKS
+      - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig \
             --name ${{ secrets.EKS_CLUSTER_NAME }} \
             --region ${{ secrets.AWS_REGION }}
+          kubectl version --short
           kubectl get nodes -o wide
 
-      # 7) Deploy to EKS
+      # 9) Deploy to EKS (update image)
       - name: Update Deployment image
         run: |
           echo "Deploying image ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }} to EKS"
           kubectl -n ${{ env.K8S_NAMESPACE }} set image deployment/${{ env.K8S_DEPLOYMENT }} \
-            ${{ env.K8S_CONTAINER }}=${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }} --record
+            ${{ env.K8S_CONTAINER }}=${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
 
-      # 8) Verify rollout
+      # 10) Verify rollout
       - name: Wait for rollout
         run: |
           kubectl -n ${{ env.K8S_NAMESPACE }} rollout status deployment/${{ env.K8S_DEPLOYMENT }} --timeout=180s
 
+      # 11) Show pods
       - name: Show pods
         run: |
           kubectl -n ${{ env.K8S_NAMESPACE }} get pods -l app=${{ env.K8S_DEPLOYMENT }} -o wide
