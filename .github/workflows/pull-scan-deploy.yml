@@ -1,5 +1,5 @@
 
-name: CI/CD -> Trivy -> EKS
+name: CI/CD -> Trivy -> EKS -> Apply Manifests
 
 on:
   push:
@@ -35,13 +35,13 @@ jobs:
           echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
           echo "Using image: ${{ env.IMAGE_REPO }}:$TAG"
 
-      # 3) Install kubectl (if not available on runner)
+      # 3) Install kubectl
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
         with:
-          version: 'v1.29.0'   # match your EKS cluster version
+          version: 'v1.29.0'
 
-      # 4) Pull Docker image from Docker Hub
+      # 4) Pull Docker image
       - name: Pull Docker image
         run: |
           echo "Pulling ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}"
@@ -73,7 +73,7 @@ jobs:
           kubectl version --short
           kubectl get nodes -o wide
 
-      # 8) Deploy to EKS (update image)
+      # 8) Deploy new image to EKS
       - name: Update Deployment image
         run: |
           echo "Deploying image ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }} to EKS"
@@ -85,7 +85,20 @@ jobs:
         run: |
           kubectl -n ${{ env.K8S_NAMESPACE }} rollout status deployment/${{ env.K8S_DEPLOYMENT }} --timeout=300s
 
-      # 10) Show pods
-      - name: Show pods
+      # ✅ NEW: Apply manifests (Deployment + Service)
+      - name: Apply Kubernetes manifests
         run: |
-          kubectl -n ${{ env.K8S_NAMESPACE }} get pods -l app=${{ env.K8S_DEPLOYMENT }} -o wide
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+
+      # ✅ NEW: Verify resources
+      - name: Verify Deployment and Pods
+        run: |
+          kubectl -n ${{ env.K8S_NAMESPACE }} get deploy endhunger -o wide
+          kubectl -n ${{ env.K8S_NAMESPACE }} get pods -l app=endhunger -o wide
+
+      - name: Verify Service and External LB
+        run: |
+          kubectl -n ${{ env.K8S_NAMESPACE }} get svc endhunger-lb -o wide
+          echo "External LB Hostname:"
+          kubectl -n ${{ env.K8S_NAMESPACE }} get svc endhunger-lb -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'; echo
