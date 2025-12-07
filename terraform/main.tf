@@ -1,69 +1,117 @@
 
-#################################
-# Provider configuration
-#################################
-provider "aws" {
-  region = var.region
-}
+name: CI/CD -> SonarQube -> Trivy -> EKS -> Apply Manifests
 
-#################################
-# VPC module
-#################################
-module "vpc" {
-  source  = "terraform-aws-modules/vpc/aws"
-  version = "5.0.0" # or "~> 5.0"
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker Hub image tag (default: latest)"
+        required: false
+        default: "latest"
 
-  name = "eks-vpc"
-  cidr = "10.0.0.0/16"
+env:
+  IMAGE_REPO: devenops641/endhunger
+  IMAGE_TAG: latest
+  K8S_NAMESPACE: default
+  K8S_DEPLOYMENT: endhunger
+  K8S_CONTAINER: endhunger
 
-  azs             = ["us-east-1a", "us-east-1b"]
-  public_subnets  = ["10.0.1.0/24", "10.0.2.0/24"]
-  private_subnets = ["10.0.3.0/24", "10.0.4.0/24"]
+jobs:
+  deploy:
+    runs-on: self-hosted
 
-  enable_nat_gateway = true
+    steps:
+      # 1) Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  tags = {
-    Name = "eks-vpc"
-  }
-}
+      # 2) Set IMAGE_TAG from workflow_dispatch (fallback to latest)
+      - name: Set IMAGE_TAG
+        run: |
+          TAG="${{ github.event.inputs.image_tag }}"
+          if [ -z "$TAG" ]; then TAG="latest"; fi
+          echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "Using image: ${{ env.IMAGE_REPO }}:$TAG"
 
-#################################
-# EKS module (Fargate only)
-#################################
-module "eks" {
-  source  = "terraform-aws-modules/eks/aws"
-  version = "21.10.1" # or "~> 21.0"
+      # 3) Install kubectl
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.29.0'
 
-  # Cluster details
-  name               = var.cluster_name
-  kubernetes_version = "1.29"
+      # 4) Pull Docker image
+      - name: Pull Docker image
+        run: |
+          echo "Pulling ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}"
+          docker pull ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
 
-  vpc_id     = module.vpc.vpc_id
-  subnet_ids = module.vpc.private_subnets
+      # ✅ 5) SonarQube Scan
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v2
+        with:
+          args: >
+            -Dsonar.projectKey=endhunger
+            -Dsonar.projectName=endhunger
+            -Dsonar.sources=.
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-  # IAM Roles for Service Accounts (recommended)
-  enable_irsa = true
+      # 6) Trivy image vulnerability scan
+      - name: Trivy Scan
+        uses: aquasecurity/trivy-action@v0.24.0
+        with:
+          image-ref: ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
 
-  # ✅ Fargate profiles (no EC2 nodes)
-  fargate_profiles = {
-    default = {
-      name = "fp-default"
-      selectors = [
-        { namespace = "default" },
-        { namespace = "kube-system" }
-      ]
-    }
-  }
+      # 7) Configure AWS credentials
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
 
-  # ✅ Create CloudWatch log group for control-plane logs
-  create_cloudwatch_log_group = true
-  # Optional: set retention (default is "forever")
-  cloudwatch_log_group_retention_in_days = 30
+      # 8) Update kubeconfig for EKS
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ secrets.EKS_CLUSTER_NAME }} \
+            --region ${{ secrets.AWS_REGION }}
+          kubectl version --short
+          kubectl get nodes -o wide
 
-  # Optional: enable specific control plane log types
-  cluster_log_types = ["api", "audit", "scheduler", "controllerManager"]
+      # 9) Deploy new image to EKS
+      - name: Update Deployment image
+        run: |
+          echo "Deploying image ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }} to EKS"
+          kubectl -n ${{ env.K8S_NAMESPACE }} set image deployment/${{ env.K8S_DEPLOYMENT }} \
+            ${{ env.K8S_CONTAINER }}=${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
 
-  tags = {
-    Name = var.cluster_name
-  }
-}
+      # 10) Verify rollout
+      - name: Wait for rollout
+        run: |
+          kubectl -n ${{ env.K8S_NAMESPACE }} rollout status deployment/${{ env.K8S_DEPLOYMENT }} --timeout=300s
+
+      # ✅ Apply manifests (Deployment + Service)
+      - name: Apply Kubernetes manifests
+        run: |
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
+
+      # ✅ Verify resources
+      - name: Verify Deployment and Pods
+        run: |
+          kubectl -n ${{ env.K8S_NAMESPACE }} get deploy endhunger -o wide
+          kubectl -n ${{ env.K8S_NAMESPACE }} get pods -l app=endhunger -o wide
+
+      - name: Verify Service and External LB
+        run: |
+          kubectl -n ${{ env.K8S_NAMESPACE }} get svc endhunger-lb -o wide
+          echo "External LB Hostname:"
+          kubectl -n ${{ env.K8S_NAMESPACE }} get svc endhunger-lb -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'; echo
+
