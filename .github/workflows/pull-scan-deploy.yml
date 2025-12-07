@@ -23,11 +23,9 @@ jobs:
     runs-on: self-hosted
 
     steps:
-      # 1) Checkout code
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2) Set IMAGE_TAG from workflow_dispatch (fallback to latest)
       - name: Set IMAGE_TAG
         run: |
           TAG="${{ github.event.inputs.image_tag }}"
@@ -35,19 +33,17 @@ jobs:
           echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
           echo "Using image: ${{ env.IMAGE_REPO }}:$TAG"
 
-      # 3) Install kubectl
+      # (Option A) Keep the action
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
         with:
           version: 'v1.29.0'
 
-      # 4) Pull Docker image
       - name: Pull Docker image
         run: |
           echo "Pulling ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}"
           docker pull ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
 
-      # ✅ 5) SonarQube Scan
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v2
         with:
@@ -59,16 +55,15 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-      # 6) Trivy image vulnerability scan
+      # FIXED: use a valid Trivy Action tag
       - name: Trivy Scan
-        uses: aquasecurity/trivy-action@v0.24.0
+        uses: aquasecurity/trivy-action@0.33.1
         with:
           image-ref: ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
           format: 'table'
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-      # 7) Configure AWS credentials
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -76,7 +71,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 8) Update kubeconfig for EKS
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig \
@@ -85,25 +79,21 @@ jobs:
           kubectl version --short
           kubectl get nodes -o wide
 
-      # 9) Deploy new image to EKS
       - name: Update Deployment image
         run: |
           echo "Deploying image ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }} to EKS"
           kubectl -n ${{ env.K8S_NAMESPACE }} set image deployment/${{ env.K8S_DEPLOYMENT }} \
             ${{ env.K8S_CONTAINER }}=${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
 
-      # 10) Verify rollout
       - name: Wait for rollout
         run: |
           kubectl -n ${{ env.K8S_NAMESPACE }} rollout status deployment/${{ env.K8S_DEPLOYMENT }} --timeout=300s
 
-      # ✅ Apply manifests (Deployment + Service)
       - name: Apply Kubernetes manifests
         run: |
           kubectl apply -f k8s/deployment.yaml
           kubectl apply -f k8s/service.yaml
 
-      # ✅ Verify resources
       - name: Verify Deployment and Pods
         run: |
           kubectl -n ${{ env.K8S_NAMESPACE }} get deploy endhunger -o wide
