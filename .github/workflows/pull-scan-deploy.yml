@@ -35,20 +35,31 @@ jobs:
           echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
           echo "Using image: ${{ env.IMAGE_REPO }}:$TAG"
 
-      # 3) Ensure kubectl is available (version should match your cluster, e.g., 1.29)
+      # 3) Install kubectl (if not available on runner)
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
         with:
-          version: 'v1.29.0'
+          version: 'v1.29.0'   # match your EKS cluster version
 
-      # 4) SonarQube scan (requires sonar-scanner installed on runner)
+      # 4) SonarQube Scan via action (no local install needed)
       - name: SonarQube Scan
-        run: |
-          sonar-scanner \
-            -Dsonar.projectKey=endhunger \
-            -Dsonar.sources=. \
-            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
-            -Dsonar.login=${{ secrets.SONAR_TOKEN }}
+        uses: sonarsource/sonarqube-scan-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=endhunger
+            -Dsonar.sources=.
+            -Dsonar.exclusions=**/node_modules/**,**/dist/**
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+
+      # (Optional) Quality Gate (blocks pipeline if not passed)
+      - name: SonarQube Quality Gate
+        uses: sonarsource/sonarqube-quality-gate-action@v1
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
       # 5) Pull Docker image from Docker Hub
       - name: Pull Docker image
@@ -65,7 +76,7 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-      # 7) Configure AWS creds
+      # 7) Configure AWS credentials
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -92,7 +103,7 @@ jobs:
       # 10) Verify rollout
       - name: Wait for rollout
         run: |
-          kubectl -n ${{ env.K8S_NAMESPACE }} rollout status deployment/${{ env.K8S_DEPLOYMENT }} --timeout=180s
+          kubectl -n ${{ env.K8S_NAMESPACE }} rollout status deployment/${{ env.K8S_DEPLOYMENT }} --timeout=300s
 
       # 11) Show pods
       - name: Show pods
