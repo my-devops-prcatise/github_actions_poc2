@@ -1,7 +1,9 @@
+
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: endhunger
+  namespace: default
   labels:
     app: endhunger
 spec:
@@ -19,9 +21,32 @@ spec:
           image: devenops641/endhunger:latest
           ports:
             - containerPort: 80
+          # Health checks
           readinessProbe:
             httpGet:
               path: /
               port: 80
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # Resource hints (adjust to your app)
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          # Optional: environment variables
+          # env:
+          #   - name: NODE_ENV
+          #     value: "production"
