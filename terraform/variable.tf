@@ -3,6 +3,6 @@ variable "region"{
 }
 
 variable "cluster_name"{
-    default = "dev-eks"
+    default = "endhunger-eks"
 }
 
