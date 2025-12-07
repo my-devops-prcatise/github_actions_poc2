@@ -13,8 +13,7 @@ output "cluster_security_group_id" {
   value       = module.eks.cluster_security_group_id
 }
 
-output "eks_managed_node_groups" {
-  description = "EKS managed node groups info"
-  value       = module.eks.eks_managed_node_groups
+output "fargate_profiles" {
+  description = "EKS Fargate profiles info"
+  value       = module.eks.fargate_profiles
 }
-
