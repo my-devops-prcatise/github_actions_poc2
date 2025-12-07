@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: endhunger-lb
+  labels:
+    app: endhunger
+spec:
+  type: LoadBalancer
+  selector:
+    app: endhunger
+  ports:
+    - name: http
+      port: 80          # Port exposed on LoadBalancer
+      targetPort: 80    # Container port in your pod

@@ -1,0 +1,7 @@
+# Terraform local modules and state files
+.terraform/
+terraform.tfstate
+terraform.tfstate.backup
+*.tfstate
+crash.log
+
