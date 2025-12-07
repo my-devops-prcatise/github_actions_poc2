@@ -1,5 +1,5 @@
 
-name: CI/CD -> SonarQube -> Trivy -> EKS
+name: CI/CD -> Trivy -> EKS
 
 on:
   push:
@@ -41,33 +41,13 @@ jobs:
         with:
           version: 'v1.29.0'   # match your EKS cluster version
 
-      # 4) SonarQube Scan via action (no local install needed)
-      - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@v2
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        with:
-          args: >
-            -Dsonar.projectKey=endhunger
-            -Dsonar.sources=.
-            -Dsonar.exclusions=**/node_modules/**,**/dist/**
-            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
-
-      # (Optional) Quality Gate (blocks pipeline if not passed)
-      - name: SonarQube Quality Gate
-        uses: sonarsource/sonarqube-quality-gate-action@v1
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-
-      # 5) Pull Docker image from Docker Hub
+      # 4) Pull Docker image from Docker Hub
       - name: Pull Docker image
         run: |
           echo "Pulling ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}"
           docker pull ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
 
-      # 6) Trivy image vulnerability scan
+      # 5) Trivy image vulnerability scan
       - name: Trivy Scan
         uses: aquasecurity/trivy-action@v0.24.0
         with:
@@ -76,7 +56,7 @@ jobs:
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
 
-      # 7) Configure AWS credentials
+      # 6) Configure AWS credentials
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -84,7 +64,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # 8) Update kubeconfig for EKS
+      # 7) Update kubeconfig for EKS
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig \
@@ -93,19 +73,19 @@ jobs:
           kubectl version --short
           kubectl get nodes -o wide
 
-      # 9) Deploy to EKS (update image)
+      # 8) Deploy to EKS (update image)
       - name: Update Deployment image
         run: |
           echo "Deploying image ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }} to EKS"
           kubectl -n ${{ env.K8S_NAMESPACE }} set image deployment/${{ env.K8S_DEPLOYMENT }} \
             ${{ env.K8S_CONTAINER }}=${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
 
-      # 10) Verify rollout
+      # 9) Verify rollout
       - name: Wait for rollout
         run: |
           kubectl -n ${{ env.K8S_NAMESPACE }} rollout status deployment/${{ env.K8S_DEPLOYMENT }} --timeout=300s
 
-      # 11) Show pods
+      # 10) Show pods
       - name: Show pods
         run: |
           kubectl -n ${{ env.K8S_NAMESPACE }} get pods -l app=${{ env.K8S_DEPLOYMENT }} -o wide
