@@ -1,5 +1,5 @@
 
-name: CI/CD -> SonarQube -> (Trivy optional) -> EKS -> Apply Manifests
+name: CI/CD -> SonarQube -> (Trivy optional) -> EKS -> Apply Manifestss
 
 on:
   push:
