@@ -39,7 +39,7 @@ jobs:
     # Expose Sonar secrets to env so we can test them in `if:` safely
     env:
       SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-      SONAR_TOKEN:    ${{ secrets.SONAR_TOKEN }}
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
     steps:
       # 1) Checkout
@@ -89,12 +89,10 @@ jobs:
       #     exit-code: '1'
       #     severity: 'CRITICAL,HIGH'
 
-      # 7) Configure AWS credentials (assumes your deploy role)
-      - name: Configure AWS credentials
+      # 7) Configure AWS credentials (OIDC)
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
           role-to-assume: arn:aws:iam::003364514867:role/EC2CodeDeployRole
           role-session-name: gha-deploy
