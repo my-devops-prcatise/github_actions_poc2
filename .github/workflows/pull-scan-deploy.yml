@@ -76,8 +76,9 @@ jobs:
           aws eks update-kubeconfig \
             --name ${{ secrets.EKS_CLUSTER_NAME }} \
             --region ${{ secrets.AWS_REGION }}
-          kubectl version --short
+          kubectl version --client
           kubectl get nodes -o wide
+          kubectl get pods --all-namespace
 
       - name: Update Deployment image
         run: |
