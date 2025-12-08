@@ -96,6 +96,7 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+          # role-to-assume: arn:aws:iam::<account-id>:role/<DeployRole> # optional
 
       # 8) Update kubeconfig + sanity checks (Fargate-friendly)
       - name: Update kubeconfig and cluster checks
@@ -105,33 +106,52 @@ jobs:
           kubectl get ns
           kubectl get pods --all-namespaces
 
-      # 9) Apply manifests (declarative create/update first)
+      # 9) (NEW) Install Kustomize (lightweight) on runner if not present
+      - name: Install Kustomize (v5)
+        shell: bash
+        run: |
+          if ! command -v kustomize >/dev/null 2>&1; then
+            curl -sL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.1/kustomize_v5.4.1_linux_amd64.tar.gz \
+              | tar -xz && sudo mv kustomize /usr/local/bin/kustomize
+          fi
+          kustomize version
+
+      # 10) (NEW) Deploy with Kustomize (overlays/prod)
+      # If you use a different overlay path, change it here.
+      - name: Deploy with Kustomize
+        run: |
+          echo "Applying Kustomize overlay..."
+          kustomize build k8s/overlays/prod | kubectl apply -f -
+          # Optional: show resulting resources
+          kubectl -n ${{ env.K8S_NAMESPACE }} get deploy,svc,cm,ingress -o wide
+
+      # 11) Apply manifests (declarative create/update first)
+      # You can keep this as a fallback or comment it if Kustomize is the source of truth.
       - name: Apply Kubernetes manifests
         run: |
           kubectl apply -n ${{ env.K8S_NAMESPACE }} -f k8s/deployment.yaml
           kubectl apply -n ${{ env.K8S_NAMESPACE }} -f k8s/service.yaml
 
-      # 10) Set image on the Deployment (pin to selected tag)
+      # 12) Set image on the Deployment (pin to selected tag)
       - name: Update Deployment image
         run: |
           echo "Deploying image ${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }} to EKS"
           kubectl -n ${{ env.K8S_NAMESPACE }} set image deployment/${{ env.K8S_DEPLOYMENT }} \
             ${{ env.K8S_CONTAINER }}=${{ env.IMAGE_REPO }}:${{ env.IMAGE_TAG }}
 
-      # 11) Wait for rollout
+      # 13) Wait for rollout
       - name: Wait for rollout
         run: |
           kubectl -n ${{ env.K8S_NAMESPACE }} rollout status deployment/${{ env.K8S_DEPLOYMENT }} --timeout=300s
 
-      # 12) Verify Deployment and Pods
+      # 14) Verify Deployment and Pods
       - name: Verify Deployment and Pods
         run: |
           kubectl -n ${{ env.K8S_NAMESPACE }} get deploy ${{ env.K8S_DEPLOYMENT }} -o wide
           kubectl -n ${{ env.K8S_NAMESPACE }} get pods -l app=${{ env.K8S_DEPLOYMENT }} -o wide
 
-      # 13) Verify Service and External LB
+      # 15) Verify Service and External LB
       - name: Verify Service and External LB
         run: |
           kubectl -n ${{ env.K8S_NAMESPACE }} get svc endhunger-lb -o wide
           echo "External LB Hostname:"
-          kubectl -n ${{ env.K8S_NAMESPACE }} get svc endhunger-lb -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'; echo
