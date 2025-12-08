@@ -3,7 +3,7 @@ name: CI/CD -> SonarQube -> (Trivy optional) -> EKS -> Apply Manifests
 
 on:
   push:
-    branches: "main" 
+    branches: [ "main" ]
   workflow_dispatch:
     inputs:
       image_tag:
