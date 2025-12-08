@@ -33,8 +33,13 @@ env:
 jobs:
   deploy:
     runs-on: self-hosted
-    # If you registered labels for the runner, use:
+    # If you registered labels on the runner, use:
     # runs-on: [ self-hosted, linux, eks ]
+
+    # Expose Sonar secrets to env so we can test them in `if:` safely
+    env:
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+      SONAR_TOKEN:    ${{ secrets.SONAR_TOKEN }}
 
     steps:
       # 1) Checkout
@@ -64,7 +69,7 @@ jobs:
 
       # 5) SonarQube Scan (runs only if secrets are present)
       - name: SonarQube Scan
-        if: ${{ secrets.SONAR_HOST_URL != '' && secrets.SONAR_TOKEN != '' }}
+        if: ${{ env.SONAR_HOST_URL != '' && env.SONAR_TOKEN != '' }}
         uses: SonarSource/sonarqube-scan-action@v2
         with:
           args: >
@@ -72,8 +77,8 @@ jobs:
             -Dsonar.projectName=endhunger
             -Dsonar.sources=.
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          SONAR_TOKEN: ${{ env.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ env.SONAR_HOST_URL }}
 
       # 6) (Optional) Trivy — currently disabled
       # - name: Trivy Scan
@@ -92,12 +97,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # 8) Update kubeconfig + sanity checks
+      # 8) Update kubeconfig + sanity checks (Fargate-friendly)
       - name: Update kubeconfig and cluster checks
         run: |
           aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
           kubectl version --client
-          # Fargate clusters may not show EC2 nodes; pods/namespaces are more useful
           kubectl get ns
           kubectl get pods --all-namespaces
 
