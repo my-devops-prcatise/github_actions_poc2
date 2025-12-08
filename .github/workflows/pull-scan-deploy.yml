@@ -90,6 +90,7 @@ jobs:
       #     severity: 'CRITICAL,HIGH'
 
       # 7) Configure AWS credentials (OIDC)
+      
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
